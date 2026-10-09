@@ -33,18 +33,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// Root Health Endpoint
-app.MapGet("/", () => Results.Ok(new
-{
-    Platform = "Resilient Webhook Platform",
-    Status = "Healthy",
-    Version = "v1.0",
-    Timestamp = DateTime.UtcNow
-}));
-
 // API Endpoint Gruplarını Haritala
 app.MapSubscriptionEndpoints();
 app.MapEventEndpoints();
 app.MapDlqEndpoints();
+app.MapDashboardEndpoints();
 
 app.Run();
