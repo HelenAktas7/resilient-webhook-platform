@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using StackExchange.Redis;
 using WebhookPlatform.Application.Common.Interfaces;
 using WebhookPlatform.Infrastructure.Delivery;
 using WebhookPlatform.Infrastructure.Persistence;
+using WebhookPlatform.Infrastructure.RateLimiting;
 using WebhookPlatform.Infrastructure.Security;
 
 namespace WebhookPlatform.Infrastructure;
@@ -27,6 +29,11 @@ public static class DependencyInjection
 
         // Polly Dayanıklılık Motoru ile donatılmış HTTP İletim Servisi
         services.AddHttpClient<IWebhookDeliveryService, WebhookDeliveryService>();
+
+        // Redis Bağlantısı ve Rate Limiter (Singleton)
+        var redisConnection = configuration.GetConnectionString("RedisConnection") ?? "localhost:6379";
+        services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConnection));
+        services.AddSingleton<IRateLimiter, RedisRateLimiter>();
 
         return services;
     }

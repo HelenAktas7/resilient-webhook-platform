@@ -1,4 +1,5 @@
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WebhookPlatform.Application.Common.Interfaces;
 using WebhookPlatform.Application.Common.Messages;
@@ -7,21 +8,25 @@ using WebhookPlatform.Domain.Entities;
 namespace WebhookPlatform.Worker.Consumers;
 
 /// <summary>
-/// RabbitMQ'dan gelen WebhookDispatchMessage görevlerini tüketen ve teslimat loglarını kaydeden Consumer.
+/// RabbitMQ'dan gelen WebhookDispatchMessage görevlerini tüketen,
+/// Redis Rate Limiting kontrolü yapan ve teslimat loglarını kaydeden Consumer.
 /// </summary>
 public class WebhookDispatchConsumer : IConsumer<WebhookDispatchMessage>
 {
     private readonly IWebhookDeliveryService _deliveryService;
     private readonly IWebhookDbContext _dbContext;
+    private readonly IRateLimiter _rateLimiter;
     private readonly ILogger<WebhookDispatchConsumer> _logger;
 
     public WebhookDispatchConsumer(
         IWebhookDeliveryService deliveryService,
         IWebhookDbContext dbContext,
+        IRateLimiter rateLimiter,
         ILogger<WebhookDispatchConsumer> logger)
     {
         _deliveryService = deliveryService;
         _dbContext = dbContext;
+        _rateLimiter = rateLimiter;
         _logger = logger;
     }
 
@@ -35,7 +40,31 @@ public class WebhookDispatchConsumer : IConsumer<WebhookDispatchMessage>
             message.TargetUrl,
             message.AttemptNumber);
 
-        // 1. Teslimat Deneme Kaydını Başlat
+        // 1. Aboneliğin Rate Limit değerini kontrol et (varsayılan 60 req/dakika)
+        var subscription = await _dbContext.Subscriptions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == message.SubscriptionId, context.CancellationToken);
+
+        var rateLimit = subscription?.RateLimitPerMinute ?? 60;
+
+        // 2. Redis Rate Limiter Kontrolü
+        var isAllowed = await _rateLimiter.IsAllowedAsync(
+            $"sub:{message.SubscriptionId}", 
+            rateLimit, 
+            TimeSpan.FromMinutes(1), 
+            context.CancellationToken);
+
+        if (!isAllowed)
+        {
+            _logger.LogWarning(
+                "🚦 Hedef sunucunun hız limiti aşıldı! (Abonelik: {SubId}, Limit: {Limit}/dk). Hedefi boğmamak için 3 sn bekleniyor...",
+                message.SubscriptionId, rateLimit);
+
+            // Hedef sunucuyu boğmamak için 3 saniye bekle (Backpressure)
+            await Task.Delay(3000, context.CancellationToken);
+        }
+
+        // 3. Teslimat Deneme Kaydını Başlat
         var attempt = new WebhookDeliveryAttempt(
             message.EventId,
             message.SubscriptionId,
@@ -45,10 +74,10 @@ public class WebhookDispatchConsumer : IConsumer<WebhookDispatchMessage>
         _dbContext.DeliveryAttempts.Add(attempt);
         await _dbContext.SaveChangesAsync(context.CancellationToken);
 
-        // 2. Polly Donanımlı İletim Servisini Çağır
+        // 4. Polly Donanımlı İletim Servisini Çağır
         var result = await _deliveryService.DeliverAsync(message, context.CancellationToken);
 
-        // 3. Denemenin Sonucunu Veritabanına Güncelle
+        // 5. Denemenin Sonucunu Veritabanına Güncelle
         if (result.IsSuccess)
         {
             attempt.MarkAsSucceeded(result.HttpStatusCode ?? 200, result.ResponseTimeMs, result.ResponseBody);
@@ -61,7 +90,6 @@ public class WebhookDispatchConsumer : IConsumer<WebhookDispatchMessage>
         }
         else
         {
-            // Eğer 5. ve son deneme de başarısız olduysa Dead Letter olarak işaretle
             if (message.AttemptNumber >= 5)
             {
                 attempt.MarkAsDeadLettered(result.HttpStatusCode, result.ResponseTimeMs, result.ErrorMessage);
@@ -73,7 +101,6 @@ public class WebhookDispatchConsumer : IConsumer<WebhookDispatchMessage>
             }
             else
             {
-                // Bir sonraki tahmini deneme zamanını hesapla
                 var nextRetrySeconds = Math.Pow(2, message.AttemptNumber) * 3;
                 var nextRetryAt = DateTime.UtcNow.AddSeconds(nextRetrySeconds);
 
