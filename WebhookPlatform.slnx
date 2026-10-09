@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WebhookPlatform.Api/WebhookPlatform.Api.csproj" />
+    <Project Path="src/WebhookPlatform.Application/WebhookPlatform.Application.csproj" />
+    <Project Path="src/WebhookPlatform.Domain/WebhookPlatform.Domain.csproj" />
+    <Project Path="src/WebhookPlatform.Infrastructure/WebhookPlatform.Infrastructure.csproj" />
+    <Project Path="src/WebhookPlatform.MockReceiver/WebhookPlatform.MockReceiver.csproj" />
+    <Project Path="src/WebhookPlatform.Worker/WebhookPlatform.Worker.csproj" />
+  </Folder>
+</Solution>

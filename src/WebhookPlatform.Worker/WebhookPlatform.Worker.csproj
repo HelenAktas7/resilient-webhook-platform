@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-WebhookPlatform.Worker-5c049f81-d524-460a-b625-106ee9f10217</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WebhookPlatform.Infrastructure\WebhookPlatform.Infrastructure.csproj" />
+    <ProjectReference Include="..\WebhookPlatform.Application\WebhookPlatform.Application.csproj" />
+  </ItemGroup>
+</Project>
