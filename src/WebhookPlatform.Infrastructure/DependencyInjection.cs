@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WebhookPlatform.Application.Common.Interfaces;
+using WebhookPlatform.Infrastructure.Delivery;
 using WebhookPlatform.Infrastructure.Persistence;
 using WebhookPlatform.Infrastructure.Security;
 
@@ -21,8 +22,11 @@ public static class DependencyInjection
 
         services.AddScoped<IWebhookDbContext>(provider => provider.GetRequiredService<WebhookDbContext>());
 
-        // HMAC Güvenlik & İmza Servisi (Thread-safe, Singleton)
+        // HMAC Güvenlik & İmza Servisi (Singleton)
         services.AddSingleton<IWebhookSigner, HmacWebhookSigner>();
+
+        // Polly Dayanıklılık Motoru ile donatılmış HTTP İletim Servisi
+        services.AddHttpClient<IWebhookDeliveryService, WebhookDeliveryService>();
 
         return services;
     }

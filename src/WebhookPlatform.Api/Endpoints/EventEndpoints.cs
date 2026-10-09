@@ -1,5 +1,7 @@
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using WebhookPlatform.Application.Common.Interfaces;
+using WebhookPlatform.Application.Common.Messages;
 using WebhookPlatform.Application.Events.Dtos;
 using WebhookPlatform.Domain.Entities;
 
@@ -12,8 +14,12 @@ public static class EventEndpoints
         var group = app.MapGroup("/api/v1/events")
             .WithTags("Webhook Ingestion & Events");
 
-        // 1. Olay Giriş Kapısı (Publish Event with Idempotency)
-        group.MapPost("/publish", async (PublishEventRequest request, IWebhookDbContext dbContext, CancellationToken ct) =>
+        // 1. Olay Giriş Kapısı (Publish Event with Idempotency & RabbitMQ Dispatch)
+        group.MapPost("/publish", async (
+            PublishEventRequest request, 
+            IWebhookDbContext dbContext, 
+            IPublishEndpoint publishEndpoint, 
+            CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.IdempotencyKey) || string.IsNullOrWhiteSpace(request.EventType))
             {
@@ -33,7 +39,6 @@ public static class EventEndpoints
 
             if (existingEvent is not null)
             {
-                // Mükerrer istek! Önceden kaydedilmiş veriyi dön (Idempotent 200 OK)
                 return Results.Ok(new PublishEventResponse(
                     existingEvent.Id,
                     existingEvent.IdempotencyKey,
@@ -45,7 +50,7 @@ public static class EventEndpoints
                 ));
             }
 
-            // 2. Yeni Olayı Kaydet
+            // 2. Yeni Olayı Veritabanına Kaydet
             var webhookEvent = new WebhookEvent(
                 request.IdempotencyKey,
                 request.EventType,
@@ -67,7 +72,23 @@ public static class EventEndpoints
 
             await dbContext.SaveChangesAsync(ct);
 
-            // 202 Accepted dön (İstek alındı, kuyruğa iletildi garantisi)
+            // 4. Eşleşen her bir abone için RabbitMQ kuyruğuna asenkron dağıtım mesajı fırlat!
+            foreach (var sub in matchedSubscriptions)
+            {
+                await publishEndpoint.Publish(new WebhookDispatchMessage
+                {
+                    EventId = webhookEvent.Id,
+                    SubscriptionId = sub.Id,
+                    TargetUrl = sub.TargetUrl,
+                    SecretKey = sub.SecretKey,
+                    EventType = webhookEvent.EventType,
+                    PayloadJson = webhookEvent.PayloadJson,
+                    AttemptNumber = 1,
+                    CreatedAtUtc = DateTime.UtcNow
+                }, ct);
+            }
+
+            // 202 Accepted dön (İstek alındı ve arka plan kuyruğuna iletildi garantisi)
             var response = new PublishEventResponse(
                 webhookEvent.Id,
                 webhookEvent.IdempotencyKey,
@@ -75,13 +96,13 @@ public static class EventEndpoints
                 "Accepted",
                 matchedSubscriptions.Count,
                 webhookEvent.CreatedAtUtc,
-                $"Olay kabul edildi ve {matchedSubscriptions.Count} abone için dağıtım sırasına alındı."
+                $"Olay kabul edildi ve {matchedSubscriptions.Count} abone için RabbitMQ dağıtım sırasına alındı."
             );
 
             return Results.Accepted($"/api/v1/events/{webhookEvent.Id}", response);
         })
         .WithName("PublishEvent")
-        .WithSummary("Sisteme yeni bir olay (Event) fırlatır ve Idempotency kontrolü uygular.");
+        .WithSummary("Sisteme yeni bir olay (Event) fırlatır, Idempotency uygular ve RabbitMQ kuyruğuna dağıtır.");
 
         // 2. Geçmiş Olayları Listele
         group.MapGet("/", async (IWebhookDbContext dbContext, CancellationToken ct) =>
