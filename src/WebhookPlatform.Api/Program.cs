@@ -7,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddOpenApi();
 
-// Clean Architecture - Infrastructure bağımlılıkları (Postgres, HMAC Signer, HttpClient vb.)
+// Clean Architecture - Infrastructure bağımlılıkları (Postgres, Redis, HMAC Signer, HttpClient vb.)
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
 // MassTransit RabbitMQ Yapılandırması (Olayları Kuyruğa Fırlatmak İçin)
@@ -45,5 +45,6 @@ app.MapGet("/", () => Results.Ok(new
 // API Endpoint Gruplarını Haritala
 app.MapSubscriptionEndpoints();
 app.MapEventEndpoints();
+app.MapDlqEndpoints();
 
 app.Run();
